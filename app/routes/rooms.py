@@ -58,7 +58,7 @@ def create_room(room: RoomCreate, db: Session = Depends(get_db)):
     db.add(new_room)
     db.flush()
 
-    host = Participant(username="host", room_id=new_room.id, role="host")
+    host = Participant(username=room.username, room_id=new_room.id, role="host")
     db.add(host)
     db.flush()
 
@@ -338,6 +338,7 @@ def skip_to_next(
         .order_by(TrackProposal.vote_count.desc(), TrackProposal.created_at.asc())
     ).all()
 
+    next_track = None
     if queue:
         next_track = queue[0]
         next_track.status = "playing"

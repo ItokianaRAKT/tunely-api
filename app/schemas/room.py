@@ -12,6 +12,7 @@ class Participant(BaseModel):
 
 class RoomCreate(BaseModel):
     name: str
+    username: str
 
 
 class RoomJoin(BaseModel):
