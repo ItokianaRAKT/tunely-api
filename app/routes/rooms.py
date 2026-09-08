@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.room import Room
 from app.models.participant import Participant
+from app.models.track_proposal import TrackProposal
 from app.schemas.room import RoomCreate, RoomJoin, Room, RoomDetail, Participant as ParticipantSchema
+from app.schemas.track_proposal import TrackProposalCreate, TrackProposal as TrackProposalSchema
 
 router = APIRouter(
     prefix="/rooms",
@@ -129,3 +131,86 @@ def join_room(code: str, data: RoomJoin, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(participant)
     return participant
+
+
+@router.get("/{code}/tracks", response_model=list[TrackProposalSchema])
+def get_room_tracks(
+    code: str,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    room = db.scalar(select(Room).where(Room.code == code))
+    tracks = db.scalars(
+        select(TrackProposal)
+        .where(TrackProposal.room_id == room.id)
+        .where(TrackProposal.status == "queued")
+        .order_by(TrackProposal.vote_count.desc(), TrackProposal.created_at.asc())
+    ).all()
+    return tracks
+
+
+@router.post("/{code}/tracks", response_model=TrackProposalSchema, status_code=201)
+def propose_track(
+    code: str,
+    track: TrackProposalCreate,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    room = db.scalar(select(Room).where(Room.code == code))
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    duplicate = db.scalar(
+        select(TrackProposal)
+        .where(TrackProposal.room_id == room.id)
+        .where(TrackProposal.youtube_id == track.youtube_id)
+        .where(TrackProposal.status == "queued")
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Track already in queue")
+
+    proposal = TrackProposal(
+        room_id=room.id,
+        proposed_by=participant.id,
+        title=track.title,
+        artist=track.artist,
+        youtube_id=track.youtube_id,
+        status="queued",
+        vote_count=0,
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
+
+@router.delete("/{code}/tracks/{track_id}")
+def remove_track(
+    code: str,
+    track_id: int,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    proposal = db.scalar(
+        select(TrackProposal)
+        .where(TrackProposal.id == track_id)
+        .where(TrackProposal.room_id == participant.room_id)
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    if proposal.proposed_by != participant.id:
+        raise HTTPException(status_code=403, detail="Only the proposer can remove this track")
+
+    if proposal.vote_count > 0:
+        raise HTTPException(status_code=400, detail="Cannot remove a track that has votes")
+
+    db.delete(proposal)
+    db.commit()
+    return {"message": "Track removed", "track_id": track_id}
