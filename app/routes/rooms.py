@@ -9,8 +9,10 @@ from app.database import get_db
 from app.models.room import Room
 from app.models.participant import Participant
 from app.models.track_proposal import TrackProposal
+from app.models.vote import Vote
 from app.schemas.room import RoomCreate, RoomJoin, Room, RoomDetail, Participant as ParticipantSchema
 from app.schemas.track_proposal import TrackProposalCreate, TrackProposal as TrackProposalSchema
+from app.schemas.vote import VoteResponse
 
 router = APIRouter(
     prefix="/rooms",
@@ -214,3 +216,63 @@ def remove_track(
     db.delete(proposal)
     db.commit()
     return {"message": "Track removed", "track_id": track_id}
+
+
+@router.post("/{code}/tracks/{track_id}/like", response_model=VoteResponse)
+def like_track(
+    code: str,
+    track_id: int,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    proposal = db.scalar(
+        select(TrackProposal)
+        .where(TrackProposal.id == track_id)
+        .where(TrackProposal.room_id == participant.room_id)
+        .where(TrackProposal.status == "queued")
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Track not found in queue")
+
+    existing_vote = db.scalar(
+        select(Vote)
+        .where(Vote.proposal_id == track_id)
+        .where(Vote.user_id == participant.id)
+    )
+    if existing_vote:
+        raise HTTPException(status_code=409, detail="Already liked this track")
+
+    vote = Vote(proposal_id=track_id, user_id=participant.id)
+    db.add(vote)
+    proposal.vote_count += 1
+    db.commit()
+    return VoteResponse(message="Liked", vote_count=proposal.vote_count)
+
+
+@router.delete("/{code}/tracks/{track_id}/like", response_model=VoteResponse)
+def unlike_track(
+    code: str,
+    track_id: int,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    vote = db.scalar(
+        select(Vote)
+        .where(Vote.proposal_id == track_id)
+        .where(Vote.user_id == participant.id)
+    )
+    if not vote:
+        raise HTTPException(status_code=404, detail="Like not found")
+
+    proposal = db.scalar(
+        select(TrackProposal)
+        .where(TrackProposal.id == track_id)
+    )
+    proposal.vote_count -= 1
+    db.delete(vote)
+    db.commit()
+    return VoteResponse(message="Unliked", vote_count=proposal.vote_count)
