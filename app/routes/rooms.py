@@ -276,3 +276,84 @@ def unlike_track(
     db.delete(vote)
     db.commit()
     return VoteResponse(message="Unliked", vote_count=proposal.vote_count)
+
+
+@router.get("/{code}/current")
+def get_current_track(
+    code: str,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    room = db.scalar(select(Room).where(Room.code == code))
+    if not room or not room.current_track_id:
+        return {"track": None}
+
+    track = db.scalar(
+        select(TrackProposal).where(TrackProposal.id == room.current_track_id)
+    )
+    if not track:
+        return {"track": None}
+
+    return {
+        "track": {
+            "id": track.id,
+            "title": track.title,
+            "artist": track.artist,
+            "youtube_id": track.youtube_id,
+            "vote_count": track.vote_count,
+        }
+    }
+
+
+@router.post("/{code}/current/next")
+def skip_to_next(
+    code: str,
+    username: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    participant = get_current_participant(code, username, db)
+
+    if participant.role != "host":
+        raise HTTPException(status_code=403, detail="Only the host can skip tracks")
+
+    room = db.scalar(select(Room).where(Room.code == code))
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    if room.current_track_id:
+        current = db.scalar(
+            select(TrackProposal).where(TrackProposal.id == room.current_track_id)
+        )
+        if current:
+            current.status = "played"
+
+    queue = db.scalars(
+        select(TrackProposal)
+        .where(TrackProposal.room_id == room.id)
+        .where(TrackProposal.status == "queued")
+        .order_by(TrackProposal.vote_count.desc(), TrackProposal.created_at.asc())
+    ).all()
+
+    if queue:
+        next_track = queue[0]
+        next_track.status = "playing"
+        room.current_track_id = next_track.id
+    else:
+        room.current_track_id = None
+
+    db.commit()
+
+    if room.current_track_id:
+        return {
+            "message": "Skipped to next track",
+            "track": {
+                "id": next_track.id,
+                "title": next_track.title,
+                "artist": next_track.artist,
+                "youtube_id": next_track.youtube_id,
+            },
+        }
+    else:
+        return {"message": "No more tracks in queue", "track": None}
