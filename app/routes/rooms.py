@@ -1,16 +1,18 @@
 import secrets
 import string
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.deps import get_current_user
 from app.models.room import Room
 from app.models.participant import Participant
 from app.models.track_proposal import TrackProposal
+from app.models.user import User
 from app.models.vote import Vote
-from app.schemas.room import RoomCreate, RoomJoin, Room as RoomSchema, RoomDetail, Participant as ParticipantSchema
+from app.schemas.room import RoomCreate, Room as RoomSchema, RoomDetail, Participant as ParticipantSchema
 from app.schemas.track_proposal import TrackProposalCreate, TrackProposal as TrackProposalSchema
 from app.schemas.vote import VoteResponse
 
@@ -34,15 +36,20 @@ def get_unique_code(db: Session) -> str:
     raise HTTPException(status_code=500, detail="Could not generate unique code")
 
 
-def get_current_participant(code: str, username: str, db: Session) -> Participant:
+def get_room_by_code(code: str, db: Session) -> Room:
     room = db.scalar(select(Room).where(Room.code == code))
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
+    return room
+
+
+def get_current_participant(code: str, user: User, db: Session) -> Participant:
+    room = get_room_by_code(code, db)
 
     participant = db.scalar(
         select(Participant)
         .where(Participant.room_id == room.id)
-        .where(Participant.username == username)
+        .where(Participant.username == user.username)
     )
     if not participant:
         raise HTTPException(status_code=403, detail="You are not in this room")
@@ -51,14 +58,18 @@ def get_current_participant(code: str, username: str, db: Session) -> Participan
 
 
 @router.post("/", response_model=RoomSchema, status_code=201)
-def create_room(room: RoomCreate, db: Session = Depends(get_db)):
+def create_room(
+    room: RoomCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     code = get_unique_code(db)
 
     new_room = Room(name=room.name, code=code, is_active=True)
     db.add(new_room)
     db.flush()
 
-    host = Participant(username=room.username, room_id=new_room.id, role="host")
+    host = Participant(username=current_user.username, room_id=new_room.id, role="host")
     db.add(host)
     db.flush()
 
@@ -69,10 +80,14 @@ def create_room(room: RoomCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{code}", response_model=RoomDetail)
-def get_room(code: str, username: str = Query(...), db: Session = Depends(get_db)):
-    participant = get_current_participant(code, username, db)
+def get_room(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    participant = get_current_participant(code, current_user, db)
 
-    room = db.scalar(select(Room).where(Room.code == code))
+    room = get_room_by_code(code, db)
     participants = db.scalars(
         select(Participant).where(Participant.room_id == room.id)
     ).all()
@@ -90,14 +105,12 @@ def get_room(code: str, username: str = Query(...), db: Session = Depends(get_db
 @router.delete("/{code}")
 def delete_room(
     code: str,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
-    room = db.scalar(select(Room).where(Room.code == code))
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+    room = get_room_by_code(code, db)
 
     if room.created_by != participant.id:
         raise HTTPException(status_code=403, detail="Only the host can delete the room")
@@ -110,10 +123,12 @@ def delete_room(
 
 
 @router.post("/{code}/join", response_model=ParticipantSchema, status_code=201)
-def join_room(code: str, data: RoomJoin, db: Session = Depends(get_db)):
-    room = db.scalar(select(Room).where(Room.code == code))
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+def join_room(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    room = get_room_by_code(code, db)
 
     if not room.is_active:
         raise HTTPException(status_code=400, detail="Room is no longer active")
@@ -121,13 +136,13 @@ def join_room(code: str, data: RoomJoin, db: Session = Depends(get_db)):
     existing = db.scalar(
         select(Participant)
         .where(Participant.room_id == room.id)
-        .where(Participant.username == data.username)
+        .where(Participant.username == current_user.username)
     )
     if existing:
-        raise HTTPException(status_code=409, detail="Username already taken in this room")
+        raise HTTPException(status_code=409, detail="Already in this room")
 
     participant = Participant(
-        username=data.username,
+        username=current_user.username,
         room_id=room.id,
         role="guest",
     )
@@ -140,12 +155,12 @@ def join_room(code: str, data: RoomJoin, db: Session = Depends(get_db)):
 @router.get("/{code}/tracks", response_model=list[TrackProposalSchema])
 def get_room_tracks(
     code: str,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    get_current_participant(code, current_user, db)
 
-    room = db.scalar(select(Room).where(Room.code == code))
+    room = get_room_by_code(code, db)
     tracks = db.scalars(
         select(TrackProposal)
         .where(TrackProposal.room_id == room.id)
@@ -159,14 +174,12 @@ def get_room_tracks(
 def propose_track(
     code: str,
     track: TrackProposalCreate,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
-    room = db.scalar(select(Room).where(Room.code == code))
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+    room = get_room_by_code(code, db)
 
     duplicate = db.scalar(
         select(TrackProposal)
@@ -196,10 +209,10 @@ def propose_track(
 def remove_track(
     code: str,
     track_id: int,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
     proposal = db.scalar(
         select(TrackProposal)
@@ -224,10 +237,10 @@ def remove_track(
 def like_track(
     code: str,
     track_id: int,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
     proposal = db.scalar(
         select(TrackProposal)
@@ -257,10 +270,10 @@ def like_track(
 def unlike_track(
     code: str,
     track_id: int,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
     vote = db.scalar(
         select(Vote)
@@ -283,12 +296,12 @@ def unlike_track(
 @router.get("/{code}/current")
 def get_current_track(
     code: str,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    get_current_participant(code, current_user, db)
 
-    room = db.scalar(select(Room).where(Room.code == code))
+    room = get_room_by_code(code, db)
     if not room or not room.current_track_id:
         return {"track": None}
 
@@ -312,17 +325,15 @@ def get_current_track(
 @router.post("/{code}/current/next")
 def skip_to_next(
     code: str,
-    username: str = Query(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    participant = get_current_participant(code, username, db)
+    participant = get_current_participant(code, current_user, db)
 
     if participant.role != "host":
         raise HTTPException(status_code=403, detail="Only the host can skip tracks")
 
-    room = db.scalar(select(Room).where(Room.code == code))
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+    room = get_room_by_code(code, db)
 
     if room.current_track_id:
         current = db.scalar(

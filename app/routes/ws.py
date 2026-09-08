@@ -2,13 +2,16 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import SECRET_KEY, ALGORITHM
 from app.database import SessionLocal
 from app.models.room import Room
 from app.models.participant import Participant
 from app.models.track_proposal import TrackProposal
+from app.models.user import User
 
 
 router = APIRouter()
@@ -44,14 +47,28 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def get_user_from_token(token: str, db: Session) -> User | None:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(payload.get("sub"))
+    except (JWTError, ValueError, TypeError):
+        return None
+    return db.scalar(select(User).where(User.id == user_id))
+
+
 @router.websocket("/rooms/{code}/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
     code: str,
-    username: str = Query(...),
+    token: str = Query(...),
 ):
     db = SessionLocal()
     try:
+        user = get_user_from_token(token, db)
+        if not user:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
         room = db.scalar(select(Room).where(Room.code == code))
         if not room:
             await websocket.close(code=4004, reason="Room not found")
@@ -60,12 +77,13 @@ async def websocket_endpoint(
         participant = db.scalar(
             select(Participant)
             .where(Participant.room_id == room.id)
-            .where(Participant.username == username)
+            .where(Participant.username == user.username)
         )
         if not participant:
             await websocket.close(code=4003, reason="You are not in this room")
             return
 
+        username = user.username
         await manager.connect(websocket, code, username)
         await manager.broadcast(code, "participant_joined", {
             "username": username,
