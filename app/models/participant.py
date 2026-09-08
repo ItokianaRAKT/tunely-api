@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, func
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,8 +23,8 @@ class Participant(Base):
     username: Mapped[str] = mapped_column(String(50))
     room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"))
     role: Mapped[str] = mapped_column(String(10))  # "host" ou "guest"
-    joined_at: Mapped[str] = mapped_column(
-        String, server_default=func.now()
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
     room: Mapped["Room"] = relationship(
