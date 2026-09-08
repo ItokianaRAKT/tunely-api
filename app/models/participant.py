@@ -25,8 +25,15 @@ class Participant(Base):
         String, server_default=func.now()
     )
 
-    room: Mapped["Room"] = relationship(back_populates="participants")
-    votes: Mapped[list["Vote"]] = relationship(back_populates="user")
+    room: Mapped["Room"] = relationship(
+        back_populates="participants",
+        foreign_keys=[room_id],
+    )
+    votes: Mapped[list["Vote"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     proposals: Mapped[list["TrackProposal"]] = relationship(
         back_populates="proposer",
+        cascade="all, delete-orphan",
     )

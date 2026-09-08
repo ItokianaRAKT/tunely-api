@@ -20,7 +20,9 @@ class Room(Base):
     current_track_id: Mapped[int | None] = mapped_column(
         ForeignKey("track_proposals.id"), nullable=True
     )
-    created_by: Mapped[int] = mapped_column(ForeignKey("participants.id"))
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("participants.id"), nullable=True
+    )
     created_at: Mapped[str] = mapped_column(
         String, server_default=func.now()
     )
@@ -28,9 +30,12 @@ class Room(Base):
     participants: Mapped[list["Participant"]] = relationship(
         back_populates="room",
         foreign_keys="Participant.room_id",
+        cascade="all, delete-orphan",
     )
     proposals: Mapped[list["TrackProposal"]] = relationship(
         back_populates="room",
+        foreign_keys="TrackProposal.room_id",
+        cascade="all, delete-orphan",
     )
     current_track: Mapped["TrackProposal | None"] = relationship(
         foreign_keys=[current_track_id],

@@ -28,6 +28,15 @@ class TrackProposal(Base):
         String, server_default=func.now()
     )
 
-    room: Mapped["Room"] = relationship(back_populates="proposals")
-    proposer: Mapped["Participant"] = relationship(back_populates="proposals")
-    votes: Mapped[list["Vote"]] = relationship(back_populates="proposal")
+    room: Mapped["Room"] = relationship(
+        back_populates="proposals",
+        foreign_keys=[room_id],
+    )
+    proposer: Mapped["Participant"] = relationship(
+        back_populates="proposals",
+        foreign_keys=[proposed_by],
+    )
+    votes: Mapped[list["Vote"]] = relationship(
+        back_populates="proposal",
+        cascade="all, delete-orphan",
+    )

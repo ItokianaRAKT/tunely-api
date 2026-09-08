@@ -10,7 +10,7 @@ from app.models.room import Room
 from app.models.participant import Participant
 from app.models.track_proposal import TrackProposal
 from app.models.vote import Vote
-from app.schemas.room import RoomCreate, RoomJoin, Room, RoomDetail, Participant as ParticipantSchema
+from app.schemas.room import RoomCreate, RoomJoin, Room as RoomSchema, RoomDetail, Participant as ParticipantSchema
 from app.schemas.track_proposal import TrackProposalCreate, TrackProposal as TrackProposalSchema
 from app.schemas.vote import VoteResponse
 
@@ -50,7 +50,7 @@ def get_current_participant(code: str, username: str, db: Session) -> Participan
     return participant
 
 
-@router.post("/", response_model=Room, status_code=201)
+@router.post("/", response_model=RoomSchema, status_code=201)
 def create_room(room: RoomCreate, db: Session = Depends(get_db)):
     code = get_unique_code(db)
 
@@ -102,6 +102,8 @@ def delete_room(
     if room.created_by != participant.id:
         raise HTTPException(status_code=403, detail="Only the host can delete the room")
 
+    room.created_by = None
+    db.flush()
     db.delete(room)
     db.commit()
     return {"message": "Room deleted", "code": code}
