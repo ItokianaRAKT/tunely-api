@@ -257,6 +257,7 @@ async def handle_skip(code: str, username: str, db: Session):
         .order_by(TrackProposal.vote_count.desc(), TrackProposal.created_at.asc())
     ).all()
 
+    next_track = None
     if queue:
         next_track = queue[0]
         next_track.status = "playing"

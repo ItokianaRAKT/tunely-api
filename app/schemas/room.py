@@ -12,6 +12,7 @@ class Participant(BaseModel):
 
 class RoomCreate(BaseModel):
     name: str
+    username: str
 
 
 class RoomJoin(BaseModel):
@@ -23,7 +24,7 @@ class Room(BaseModel):
     name: str
     code: str
     is_active: bool
-    created_by: int
+    created_by: int | None = None
 
     class Config:
         from_attributes = True
