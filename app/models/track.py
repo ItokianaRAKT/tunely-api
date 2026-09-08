@@ -18,5 +18,6 @@ class Track(Base):
     youtube_id: Mapped[str] = mapped_column(String(20))
 
     playlists: Mapped[list["Playlist"]] = relationship(
-        secondary="playlist_tracks"
+        secondary="playlist_tracks",
+        back_populates="tracks",
     )

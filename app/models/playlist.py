@@ -17,5 +17,6 @@ class Playlist(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     tracks: Mapped[list["Track"]] = relationship(
-        secondary="playlist_tracks"
+        secondary="playlist_tracks",
+        back_populates="playlists",
     )
