@@ -23,7 +23,7 @@ class Room(BaseModel):
     name: str
     code: str
     is_active: bool
-    created_by: int
+    created_by: int | None = None
 
     class Config:
         from_attributes = True
