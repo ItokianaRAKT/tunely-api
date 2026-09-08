@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, String, func
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,8 +25,8 @@ class Room(Base):
     created_by: Mapped[int | None] = mapped_column(
         ForeignKey("participants.id"), nullable=True
     )
-    created_at: Mapped[str] = mapped_column(
-        String, server_default=func.now()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
     participants: Mapped[list["Participant"]] = relationship(
